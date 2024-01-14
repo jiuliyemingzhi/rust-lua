@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::Read;
 use std::ops::Range;
+use std::str::FromStr;
 use logos::{Lexer, Logos, Span};
 
 pub struct TokenExtras {
@@ -15,7 +16,7 @@ pub struct TokenExtras {
 impl TokenExtras {
     pub fn println_err(&self, lex: &Lexer<TokenEnum>, span: Range<usize>, reason: &str) {
         let x = &lex.source()[span];
-        println!("{}:{}:  {} '{}'", self.file_path, self.line_breaks, reason, x)
+        println!("{}:{}: {} '{}'", self.file_path, self.line_breaks, reason, x)
     }
 }
 
@@ -37,53 +38,103 @@ pub enum TokenEnum {
     #[regex(r"[ \t]+")]
     Skip,
     #[regex(r"(\r\n)|[\n\f\r]", line)]
-    Line,
-    #[regex(r"--[^\n\f\r]*", str_lexer)]
+    Line(Token<String>),
+    #[regex(r"--[^\n\f\r]*", string_lexer)]
     Comment(Token<String>),
-    #[regex(r#""([^"\\]|\\.|"")*""#, string_lexer)]
-    #[regex(r#"'([^'\\]|\\.|'')*'"#, string_lexer)]
-    QuotedString(Token<String>),
-    #[token("=")]
-    Equal,
-    #[token("+")]
-    Plus,
-    #[token(";")]
-    Semicolon,
-    #[token(",")]
-    Comma,
-    #[token("..")]
-    DoubleDot,
-    #[token("(")]
-    ParenthesesLeft,
-    #[token(")")]
-    ParenthesesRight,
-    #[regex(r"[_a-zA-Z][_0-9a-zA-Z]*", str_lexer)]
+    #[token("=", empty)]
+    Equal(Token<()>),
+    #[token("+", empty)]
+    Plus(Token<()>),
+    #[token("-", empty)]
+    Sub(Token<()>),
+    #[token("*", empty)]
+    Mul(Token<()>),
+    #[token("/", empty)]
+    Div(Token<()>),
+    #[token("//", empty)]
+    DivToInt(Token<()>),
+    #[token(";", empty)]
+    Semicolon(Token<()>),
+    #[token(",", empty)]
+    Comma(Token<()>),
+    #[token("..", empty)]
+    DoubleDot(Token<()>),
+    #[token(".", empty)]
+    Dot(Token<()>),
+    #[token(">", empty)]
+    Gt(Token<()>),
+    #[token("<", empty)]
+    Lt(Token<()>),
+    #[token("(", empty)]
+    ParenthesesLeft(Token<()>),
+    #[token(")", empty)]
+    ParenthesesRight(Token<()>),
+    #[token("function", empty)]
+    Function(Token<()>),
+    #[token("end", empty)]
+    End(Token<()>),
+    #[token("local", empty)]
+    Local(Token<()>),
+    #[token("break", empty)]
+    Break(Token<()>),
+    #[token("do", empty)]
+    Do(Token<()>),
+    #[token("while", empty)]
+    While(Token<()>),
+    #[token("if", empty)]
+    If(Token<()>),
+    #[token("else", empty)]
+    Else(Token<()>),
+    #[token("elseif", empty)]
+    Elseif(Token<()>),
+    #[token("then", empty)]
+    Then(Token<()>),
+    #[token("repeat", empty)]
+    Repeat(Token<()>),
+    #[token("until", empty)]
+    Until(Token<()>),
+    #[token("for", empty)]
+    For(Token<()>),
+    #[token("goto", empty)]
+    Goto(Token<()>),
+    #[token("and", empty)]
+    And(Token<()>),
+    #[token("or", empty)]
+    Or(Token<()>),
+    #[regex(r"[_a-zA-Z][_0-9a-zA-Z]*", parse_lexer)]
     Name(Token<String>),
     #[regex("(0x)?[0-9]+", u64_lexer)]
     Int(Token<u64>),
-    #[regex(r"([0-9]*\.[0-9]+([eE][+-]?[0-9]+)?)|([0-9]+\.[0-9]*([eE][+-]?[0-9]+)?)|([0-9]+[eE][+-]?[0-9]+)", f64_lexer)]
+    #[regex(r"([0-9]*\.[0-9]+([eE][+-]?[0-9]+)?)|([0-9]+\.[0-9]*([eE][+-]?[0-9]+)?)|([0-9]+[eE][+-]?[0-9]+)", parse_lexer)]
     Float(Token<f64>),
-    #[token("function")]
-    Function,
-    #[token("end")]
-    End,
-    #[token("local")]
-    Local,
+    #[token("true", parse_lexer)]
+    #[token("false", parse_lexer)]
+    Bool(Token<bool>),
+    #[regex(r#""([^"\\]|\\.|"")*""#, string_lexer)]
+    #[regex(r#"'([^'\\]|\\.|'')*'"#, string_lexer)]
+    QuotedString(Token<String>),
 }
 
 impl TokenEnum {
     pub fn is_separate(&self) -> bool {
         match self {
             TokenEnum::Skip
-            | TokenEnum::Line
+            | TokenEnum::Line(_)
             | TokenEnum::Comment(_)
-            | TokenEnum::Equal
-            | TokenEnum::Plus
-            | TokenEnum::Semicolon
-            | TokenEnum::Comma
-            | TokenEnum::DoubleDot
-            | TokenEnum::ParenthesesLeft
-            | TokenEnum::ParenthesesRight => true,
+            | TokenEnum::Equal(_)
+            | TokenEnum::Plus(_)
+            | TokenEnum::Semicolon(_)
+            | TokenEnum::Comma(_)
+            | TokenEnum::DoubleDot(_)
+            | TokenEnum::ParenthesesLeft(_)
+            | TokenEnum::Gt(_)
+            | TokenEnum::Lt(_)
+            | TokenEnum::Sub(_)
+            | TokenEnum::Mul(_)
+            | TokenEnum::Div(_)
+            | TokenEnum::DivToInt(_)
+            | TokenEnum::QuotedString(_)
+            | TokenEnum::ParenthesesRight(_) => true,
             _ => false,
         }
     }
@@ -110,14 +161,10 @@ impl<T> Token<T> {
 }
 
 #[inline]
-fn str_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<String>> {
-    Some(Token::new(lex.slice().to_string(), lex.span(), lex.extras.line_breaks))
-}
-
-#[inline]
 fn string_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<String>> {
     let span = lex.span();
     let x = lex.slice();
+    x.as_bytes().
     Some(Token::new(x[..x.len() - 1].replace("\\", ""), span, lex.extras.line_breaks))
 }
 
@@ -133,10 +180,11 @@ fn u64_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<u64>> {
     }
 }
 
-fn f64_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<f64>> {
+fn parse_lexer<T>(lex: &mut Lexer<TokenEnum>) -> Option<Token<T>>
+    where <T as FromStr>::Err: std::fmt::Display, T: FromStr {
     match lex.slice().parse() {
         Ok(v) => Some(Token::new(v, lex.span(), lex.extras.line_breaks)),
-        Err(err) => print_err(lex, err.to_string().as_str())
+        Err(err) => { print_err(lex, &err.to_string()) }
     }
 }
 
@@ -148,10 +196,15 @@ impl TokenEnum {
         lex.extras.file_path = lua_path.to_string();
         let mut token_list: Vec<TokenEnum> = Vec::new();
         while let Some(token) = lex.next() {
-            // println!("{:?} {}", token, lex.extras.line_start);
-            if let Ok(ok) = token {
-                on_token(&mut lex, &ok);
-                token_list.push(ok);
+            println!("{:?}", token);
+            match token {
+                Ok(ok) => {
+                    on_token(&mut lex, &ok);
+                    token_list.push(ok);
+                }
+                Err(err) => {
+                    println!("{:?}", err);
+                }
             }
         }
         Ok(lex.count())
@@ -166,10 +219,10 @@ fn print_err<T>(lex: &Lexer<TokenEnum>, err: &str) -> Option<Token<T>> {
 
 
 #[inline]
-fn line(lex: &mut Lexer<TokenEnum>) -> logos::Skip {
+fn line(lex: &mut Lexer<TokenEnum>) -> Option<usize> {
     lex.extras.line_breaks += 1;
     lex.extras.line_start = lex.span().start;
-    logos::Skip
+    Some(lex.extras.line_breaks)
 }
 
 fn on_token(lex: &mut Lexer<TokenEnum>, token: &TokenEnum) {
@@ -178,4 +231,8 @@ fn on_token(lex: &mut Lexer<TokenEnum>, token: &TokenEnum) {
     }
     lex.extras.before_token_is_separate = token.is_separate();
     lex.extras.before_token_start = lex.span().start;
+}
+
+fn empty(lex: &mut Lexer<TokenEnum>) -> Option<Token<()>> {
+    Some(Token::new((), lex.span(), lex.extras.line_breaks))
 }
