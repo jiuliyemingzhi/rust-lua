@@ -1,13 +1,22 @@
-use std::error::Error;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Read;
+use std::ops::Range;
 use logos::{Lexer, Logos, Span};
 
 pub struct TokenExtras {
     line_breaks: usize,
     line_start: usize,
     file_path: String,
+    before_token_is_separate: bool,
+    before_token_start: usize,
+}
+
+impl TokenExtras {
+    pub fn println_err(&self, lex: &Lexer<TokenEnum>, span: Range<usize>, reason: &str) {
+        let x = &lex.source()[span];
+        println!("{}:{}:  {} '{}'", self.file_path, self.line_breaks, reason, x)
+    }
 }
 
 impl Default for TokenExtras {
@@ -16,14 +25,17 @@ impl Default for TokenExtras {
             line_breaks: 1,
             line_start: 0,
             file_path: "".to_string(),
+            before_token_is_separate: true,
+            before_token_start: 0,
         }
     }
 }
 
 #[derive(Logos, Debug)]
 #[logos(extras = TokenExtras)]
-#[logos(skip r"[ \t]")]
 pub enum TokenEnum {
+    #[regex(r"[ \t]+")]
+    Skip,
     #[regex(r"(\r\n)|[\n\f\r]", line)]
     Line,
     #[regex(r"--[^\n\f\r]*", str_lexer)]
@@ -58,6 +70,25 @@ pub enum TokenEnum {
     #[token("local")]
     Local,
 }
+
+impl TokenEnum {
+    pub fn is_separate(&self) -> bool {
+        match self {
+            TokenEnum::Skip
+            | TokenEnum::Line
+            | TokenEnum::Comment(_)
+            | TokenEnum::Equal
+            | TokenEnum::Plus
+            | TokenEnum::Semicolon
+            | TokenEnum::Comma
+            | TokenEnum::DoubleDot
+            | TokenEnum::ParenthesesLeft
+            | TokenEnum::ParenthesesRight => true,
+            _ => false,
+        }
+    }
+}
+
 
 #[derive(Debug)]
 pub struct Token<T> {
@@ -98,14 +129,14 @@ fn u64_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<u64>> {
     } else { 10 };
     match u64::from_str_radix(x, radix) {
         Ok(v) => Some(Token::new(v, lex.span(), lex.extras.line_breaks)),
-        Err(err) => print_err(lex, Box::new(err))
+        Err(err) => print_err(lex, err.to_string().as_str())
     }
 }
 
 fn f64_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<f64>> {
     match lex.slice().parse() {
         Ok(v) => Some(Token::new(v, lex.span(), lex.extras.line_breaks)),
-        Err(err) => print_err(lex, Box::new(err))
+        Err(err) => print_err(lex, err.to_string().as_str())
     }
 }
 
@@ -115,24 +146,24 @@ impl TokenEnum {
         File::open(lua_path)?.read_to_string(&mut content)?;
         let mut lex = Self::lexer(content.as_str());
         lex.extras.file_path = lua_path.to_string();
+        let mut token_list: Vec<TokenEnum> = Vec::new();
         while let Some(token) = lex.next() {
-            println!("{:?}", token)
+            // println!("{:?} {}", token, lex.extras.line_start);
+            if let Ok(ok) = token {
+                on_token(&mut lex, &ok);
+                token_list.push(ok);
+            }
         }
         Ok(lex.count())
     }
 }
 
 #[inline]
-fn print_err<T>(lex: &Lexer<TokenEnum>, err: Box<dyn Error>) -> Option<Token<T>> {
-    let source = &lex.source()[lex.extras.line_start..];
-    println!("{:?}: {}, {} {}\nerr: {:?}",
-             lex.extras.file_path,
-             lex.extras.line_breaks,
-             lex.slice(),
-             &source[..source.as_bytes().iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(source.len())],
-             err);
+fn print_err<T>(lex: &Lexer<TokenEnum>, err: &str) -> Option<Token<T>> {
+    lex.extras.println_err(lex, lex.span(), err);
     None
 }
+
 
 #[inline]
 fn line(lex: &mut Lexer<TokenEnum>) -> logos::Skip {
@@ -141,3 +172,10 @@ fn line(lex: &mut Lexer<TokenEnum>) -> logos::Skip {
     logos::Skip
 }
 
+fn on_token(lex: &mut Lexer<TokenEnum>, token: &TokenEnum) {
+    if !token.is_separate() && !lex.extras.before_token_is_separate {
+        lex.extras.println_err(lex, lex.extras.before_token_start..lex.span().end, "unknown token")
+    }
+    lex.extras.before_token_is_separate = token.is_separate();
+    lex.extras.before_token_start = lex.span().start;
+}
