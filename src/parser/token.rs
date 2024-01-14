@@ -21,7 +21,7 @@ impl Default for TokenExtras {
 
 #[derive(Logos, Debug)]
 #[logos(extras = TokenExtras)]
-#[logos(skip r"\t")]
+#[logos(skip r"[ \t]")]
 pub enum TokenEnum {
     #[regex(r"[\n\f]", line)]
     Line,
@@ -29,6 +29,10 @@ pub enum TokenEnum {
     Comment(Token<String>),
     #[token("=")]
     Equal,
+    #[token("+")]
+    Plus,
+    #[token(";")]
+    Semicolon,
     #[token(",")]
     Comma,
     #[token("(")]
@@ -69,16 +73,19 @@ impl Token<String> {
 impl Token<u64> {
     #[inline]
     fn from_lexer(lex: &mut Lexer<TokenEnum>) -> Option<Token<u64>> {
-        let x = lex.slice();
-        let radix = if x.starts_with("0x") { 16 } else { 10 };
+        let mut x = lex.slice();
+        let radix = if x.starts_with("0x") {
+            x = &x[..2];
+            16
+        } else { 10 };
         match u64::from_str_radix(x, radix) {
             Ok(v) => Some(Token::new(v, lex.span(), lex.extras.line_breaks)),
             Err(err) => {
-                let source = lex.source();
-                println!("{:?}: {} \n {}, err: {:?}",
+                let source = &lex.source()[..lex.extras.line_start];
+                println!("{:?}: {}, {}\nerr: {:?}",
                          lex.extras.file_path,
                          lex.extras.line_breaks,
-                         &source[lex.extras.line_start..source.as_bytes().iter().position(|&c| c == b'\n').unwrap_or(source.len())],
+                         &source[..source.as_bytes().iter().position(|&c| c == b'\n').unwrap_or(source.len())],
                          err);
                 None
             }
@@ -103,7 +110,7 @@ impl TokenEnum {
 #[inline]
 fn line(lex: &mut Lexer<TokenEnum>) -> logos::Skip {
     lex.extras.line_breaks += 1;
-    lex.extras.line_start = lex.span().start;
+    lex.extras.line_start = lex.span().end;
     logos::Skip
 }
 
